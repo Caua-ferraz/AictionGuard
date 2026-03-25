@@ -54,15 +54,15 @@ Right now, most teams deploying AI agents are just... hoping they behave.
 
 ```bash
 # From source
-git clone https://github.com/Caua-ferraz/agentguard.git
-cd agentguard
-go build -o agentguard ./cmd/agentguard
+git clone https://github.com/Caua-ferraz/AictionGuard.git
+cd AictionGuard
+go build -o AictionGuard ./cmd/AictionGuard
 
 # Or via Go install
-go install github.com/Caua-ferraz/agentguard/cmd/agentguard@latest
+go install github.com/Caua-ferraz/AictionGuard/cmd/AictionGuard@latest
 
 # Or Docker
-docker run -d -p 8080:8080 -v ./configs:/etc/agentguard agentguard:latest
+docker run -d -p 8080:8080 -v ./configs:/etc/AictionGuard AictionGuard:latest
 ```
 
 ### Define a Policy
@@ -70,7 +70,7 @@ docker run -d -p 8080:8080 -v ./configs:/etc/agentguard agentguard:latest
 Create `policies/default.yaml`:
 
 ```yaml
-# AgentGuard Policy File
+# AictionGuard Policy File
 version: "1"
 name: "development-sandbox"
 description: "Safe defaults for development agents"
@@ -149,20 +149,20 @@ notifications:
 
 ```bash
 # Start AgentGuard with the default policy
-agentguard serve --policy configs/default.yaml --port 8080
+AictionGuard serve --policy configs/default.yaml --port 8080
 
 # With the dashboard enabled
-agentguard serve --policy configs/default.yaml --port 8080 --dashboard
+AictionGuard serve --policy configs/default.yaml --port 8080 --dashboard
 
 # Watch mode (live policy reloading)
-agentguard serve --policy configs/default.yaml --watch --dashboard
+AictionGuard serve --policy configs/default.yaml --watch --dashboard
 ```
 
 ### Connect Your Agent
 
 ```python
 # Python — wrap any agent framework
-from agentguard import Guard
+from AictionGuard import Guard
 
 guard = Guard("http://localhost:8080")
 
