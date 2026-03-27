@@ -321,10 +321,10 @@ AgentGuard works with any agent framework through adapters:
 
 | Framework | Status | Install |
 |---|---|---|
-| LangChain | Ready | `pip install agentguard[langchain]` |
-| CrewAI | Ready | `pip install agentguard[crewai]` |
-| browser-use | Ready | `pip install agentguard[browser-use]` |
-| Anthropic MCP | Ready | `pip install agentguard[mcp]` |
+| LangChain | Ready | `pip install agentguardproxy[langchain]` |
+| CrewAI | Ready | `pip install agentguardproxy[crewai]` |
+| browser-use | Ready | `pip install agentguardproxy[browser-use]` |
+| Anthropic MCP | Ready | `pip install agentguardproxy[mcp]` |
 | TypeScript/Node.js | Ready | `npm install @agentguard/sdk` |
 | Custom / HTTP | Ready | Any HTTP client |
 | AutoGPT | Planned | — |

@@ -5,13 +5,13 @@ Lightweight Python client for [AgentGuard](https://github.com/Caua-ferraz/AgentG
 ## Install
 
 ```bash
-pip install agentguard
+pip install agentguardproxy
 
 # With framework adapters
-pip install agentguard[langchain]
-pip install agentguard[crewai]
-pip install agentguard[browser-use]
-pip install agentguard[all]
+pip install agentguardproxy[langchain]
+pip install agentguardproxy[crewai]
+pip install agentguardproxy[browser-use]
+pip install agentguardproxy[all]
 ```
 
 ## Quick Start
