@@ -18,11 +18,6 @@
   <a href="docs/CONTRIBUTING.md">Contributing</a>
 </p>
 
----
-## ⚠️ Attention
-
-Some features of this project are not yet fully implemented and are currently under active development.
-
 
 ## The Problem
 
