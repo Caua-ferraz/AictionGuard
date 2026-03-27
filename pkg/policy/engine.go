@@ -3,7 +3,6 @@ package policy
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -373,25 +372,55 @@ func matchRule(rule Rule, req ActionRequest) bool {
 }
 
 // globMatch performs simple glob pattern matching supporting * and **.
+// Unlike filepath.Match, the single * wildcard matches any character including
+// path separators, which is required for shell command patterns like "rm -rf *"
+// matching "rm -rf /tmp/data".
 func globMatch(pattern, value string) bool {
-	// Use filepath.Match for simple globs
-	if !strings.Contains(pattern, "**") {
-		matched, _ := filepath.Match(pattern, value)
-		return matched
-	}
-
 	// Handle ** (match any number of path segments)
-	parts := strings.Split(pattern, "**")
-	if len(parts) == 2 {
-		prefix := strings.TrimSuffix(parts[0], "/")
-		suffix := strings.TrimPrefix(parts[1], "/")
+	if strings.Contains(pattern, "**") {
+		parts := strings.Split(pattern, "**")
+		if len(parts) == 2 {
+			prefix := strings.TrimSuffix(parts[0], "/")
+			suffix := strings.TrimPrefix(parts[1], "/")
 
-		hasPrefix := prefix == "" || strings.HasPrefix(value, prefix)
-		hasSuffix := suffix == "" || strings.HasSuffix(value, suffix)
-		return hasPrefix && hasSuffix
+			hasPrefix := prefix == "" || strings.HasPrefix(value, prefix)
+			hasSuffix := suffix == "" || strings.HasSuffix(value, suffix)
+			return hasPrefix && hasSuffix
+		}
+		return false
 	}
 
-	return false
+	// Simple wildcard match: * matches zero or more of any character (including /)
+	return wildcardMatch(pattern, value)
+}
+
+// wildcardMatch matches a pattern with * (any chars) and ? (single char) wildcards.
+func wildcardMatch(pattern, value string) bool {
+	px, vx := 0, 0
+	starPx, starVx := -1, -1
+
+	for vx < len(value) {
+		if px < len(pattern) && (pattern[px] == '?' || pattern[px] == value[vx]) {
+			px++
+			vx++
+		} else if px < len(pattern) && pattern[px] == '*' {
+			starPx = px
+			starVx = vx
+			px++
+		} else if starPx >= 0 {
+			starVx++
+			vx = starVx
+			px = starPx + 1
+		} else {
+			return false
+		}
+	}
+
+	for px < len(pattern) && pattern[px] == '*' {
+		px++
+	}
+
+	return px == len(pattern)
 }
 
 func formatRule(decision, scope string, rule Rule) string {
