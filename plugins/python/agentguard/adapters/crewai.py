@@ -18,7 +18,7 @@ Usage:
 """
 
 from typing import Any, List, Optional
-from agentguard import Guard
+from agentguard import Guard, DEFAULT_BASE_URL
 
 
 class GuardedCrewTool:
@@ -32,7 +32,7 @@ class GuardedCrewTool:
         self,
         tool: Any,
         guard: Optional[Guard] = None,
-        guard_url: str = "http://localhost:8080",
+        guard_url: str = DEFAULT_BASE_URL,
         agent_id: str = "",
         scope: str = "shell",
     ):

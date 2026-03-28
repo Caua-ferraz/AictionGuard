@@ -37,6 +37,9 @@ type QueryFilter struct {
 	Limit     int        `json:"limit,omitempty"`
 }
 
+// DefaultFilePermissions is the Unix file mode for newly created audit log files.
+const DefaultFilePermissions = 0644
+
 // FileLogger writes audit entries as JSON lines to a file.
 type FileLogger struct {
 	mu   sync.Mutex
@@ -46,7 +49,7 @@ type FileLogger struct {
 
 // NewFileLogger creates a new file-based audit logger.
 func NewFileLogger(path string) (*FileLogger, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, DefaultFilePermissions)
 	if err != nil {
 		return nil, fmt.Errorf("opening audit log: %w", err)
 	}
@@ -70,7 +73,9 @@ func (l *FileLogger) Log(entry Entry) error {
 }
 
 // Query reads the log file and filters entries.
-// For production use, this should be replaced with a database-backed implementation.
+// TODO(perf): Query scans the full file linearly. For production workloads
+// with large audit logs, replace with a database-backed implementation
+// (SQLite or PostgreSQL).
 func (l *FileLogger) Query(filter QueryFilter) ([]Entry, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

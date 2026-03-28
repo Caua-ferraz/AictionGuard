@@ -2,11 +2,17 @@
 AgentGuard Quick Start Example
 
 Demonstrates how to guard a simple AI agent that can run shell commands
-and make API calls. Start AgentGuard first:
+and make API calls.
+
+1. Install the SDK:
+
+    pip install agentguardproxy
+
+2. Start AgentGuard:
 
     agentguard serve --policy configs/default.yaml --dashboard
 
-Then run this script:
+3. Run this script:
 
     python examples/quickstart.py
 """

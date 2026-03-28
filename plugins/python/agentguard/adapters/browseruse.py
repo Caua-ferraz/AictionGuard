@@ -20,7 +20,7 @@ Usage:
 
 from typing import Any, Optional
 from urllib.parse import urlparse
-from agentguard import Guard, CheckResult
+from agentguard import Guard, CheckResult, DEFAULT_BASE_URL
 
 
 class GuardedBrowser:
@@ -34,7 +34,7 @@ class GuardedBrowser:
     def __init__(
         self,
         guard: Optional[Guard] = None,
-        guard_url: str = "http://localhost:8080",
+        guard_url: str = DEFAULT_BASE_URL,
         agent_id: str = "",
         browser: Any = None,
     ):

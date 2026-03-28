@@ -160,6 +160,11 @@ agentguard serve --policy configs/default.yaml --watch --dashboard
 
 ### Connect Your Agent
 
+```bash
+# Install the Python SDK
+pip install agentguardproxy
+```
+
 ```python
 # Python — wrap any agent framework
 from agentguard import Guard

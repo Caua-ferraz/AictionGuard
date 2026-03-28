@@ -35,7 +35,11 @@ MCP config (claude_desktop_config.json / .cursor/mcp.json):
 import json
 import sys
 from typing import Any, Callable, Dict, List, Optional
-from agentguard import Guard, CheckResult
+from agentguard import Guard, CheckResult, DEFAULT_BASE_URL
+
+# MCP protocol constants
+MCP_PROTOCOL_VERSION = "2024-11-05"
+SDK_VERSION = "0.2.0"
 
 
 class ToolDefinition:
@@ -64,10 +68,10 @@ class GuardedMCPServer:
     def __init__(
         self,
         guard: Optional[Guard] = None,
-        guard_url: str = "http://localhost:8080",
+        guard_url: str = DEFAULT_BASE_URL,
         agent_id: str = "mcp-agent",
         server_name: str = "agentguard",
-        server_version: str = "0.2.0",
+        server_version: str = SDK_VERSION,
     ):
         self._guard = guard or Guard(guard_url, agent_id=agent_id)
         self._tools: Dict[str, ToolDefinition] = {}
@@ -141,7 +145,7 @@ class GuardedMCPServer:
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": MCP_PROTOCOL_VERSION,
                     "serverInfo": {
                         "name": self._server_name,
                         "version": self._server_version,

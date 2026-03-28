@@ -11,6 +11,9 @@ import (
 	"github.com/Caua-ferraz/AgentGuard/pkg/policy"
 )
 
+// DefaultHTTPTimeout is the timeout for webhook and Slack HTTP requests.
+const DefaultHTTPTimeout = 10 * time.Second
+
 // Event describes something that happened in the system.
 type Event struct {
 	Type      string               `json:"type"` // "approval_required", "denied", "allowed"
@@ -48,9 +51,9 @@ func NewDispatcher(cfg policy.NotificationCfg) *Dispatcher {
 func targetToNotifier(t policy.NotifyTarget, eventFilter string) Notifier {
 	switch t.Type {
 	case "webhook":
-		return &WebhookNotifier{URL: t.URL, Filter: eventFilter}
+		return &WebhookNotifier{URL: t.URL, Filter: eventFilter, client: &http.Client{Timeout: DefaultHTTPTimeout}}
 	case "slack":
-		return &SlackNotifier{WebhookURL: t.URL, Filter: eventFilter}
+		return &SlackNotifier{WebhookURL: t.URL, Filter: eventFilter, client: &http.Client{Timeout: DefaultHTTPTimeout}}
 	case "console":
 		return &ConsoleNotifier{Filter: eventFilter}
 	case "log":
@@ -79,6 +82,7 @@ func (d *Dispatcher) Send(event Event) {
 type WebhookNotifier struct {
 	URL    string
 	Filter string // only fire for this event type ("" = all)
+	client *http.Client
 }
 
 func (w *WebhookNotifier) Notify(event Event) error {
@@ -96,8 +100,7 @@ func (w *WebhookNotifier) Notify(event Event) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "AgentGuard/1.0")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := w.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("webhook POST %s: %w", w.URL, err)
 	}
@@ -114,6 +117,7 @@ func (w *WebhookNotifier) Notify(event Event) error {
 type SlackNotifier struct {
 	WebhookURL string
 	Filter     string
+	client     *http.Client
 }
 
 func (s *SlackNotifier) Notify(event Event) error {
@@ -166,8 +170,7 @@ func (s *SlackNotifier) Notify(event Event) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := s.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("slack POST: %w", err)
 	}

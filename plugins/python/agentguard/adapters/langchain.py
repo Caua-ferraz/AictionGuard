@@ -16,7 +16,7 @@ Usage:
 """
 
 from typing import Any, List, Optional
-from agentguard import Guard, CheckResult
+from agentguard import Guard, CheckResult, DEFAULT_BASE_URL
 
 
 class GuardedTool:
@@ -133,7 +133,7 @@ class GuardedToolkit:
     def __init__(
         self,
         tools: List[Any],
-        guard_url: str = "http://localhost:8080",
+        guard_url: str = DEFAULT_BASE_URL,
         agent_id: str = "",
         default_scope: str = "shell",
     ):

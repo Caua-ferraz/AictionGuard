@@ -32,6 +32,7 @@ func main() {
 	watch := serveCmd.Bool("watch", false, "Watch policy file for changes")
 	auditPath := serveCmd.String("audit-log", "audit.jsonl", "Path to audit log file")
 	apiKey := serveCmd.String("api-key", "", "Bearer token for approve/deny endpoints")
+	baseURL := serveCmd.String("base-url", "", "External base URL for approval links (default: http://localhost:<port>)")
 
 	validateCmd := flag.NewFlagSet("validate", flag.ExitOnError)
 	validateFile := validateCmd.String("policy", "configs/default.yaml", "Policy file to validate")
@@ -60,7 +61,7 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		_ = serveCmd.Parse(os.Args[2:]) // flag.ExitOnError handles errors
-		runServe(*policyFile, *port, *dashboard, *watch, *auditPath, *apiKey)
+		runServe(*policyFile, *port, *dashboard, *watch, *auditPath, *apiKey, *baseURL)
 
 	case "validate":
 		_ = validateCmd.Parse(os.Args[2:])
@@ -120,7 +121,10 @@ Run 'agentguard <command> -h' for details on each command.
 `)
 }
 
-func runServe(policyFile string, port int, dashboardEnabled bool, watch bool, auditPath string, apiKey string) {
+func runServe(policyFile string, port int, dashboardEnabled bool, watch bool, auditPath string, apiKey string, baseURL string) {
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("http://localhost:%d", port)
+	}
 	// Load policy
 	pol, err := policy.LoadFromFile(policyFile)
 	if err != nil {
@@ -161,6 +165,8 @@ func runServe(policyFile string, port int, dashboardEnabled bool, watch bool, au
 		DashboardEnabled: dashboardEnabled,
 		Notifier:         notifier,
 		APIKey:           apiKey,
+		BaseURL:          baseURL,
+		Version:          version,
 	})
 
 	// Graceful shutdown

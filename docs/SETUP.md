@@ -82,13 +82,18 @@ curl -X POST http://localhost:8080/v1/check \
 ### Install
 
 ```bash
-cd plugins/python
-pip install -e .
+# From PyPI
+pip install agentguardproxy
 
-# With framework support
-pip install -e ".[langchain]"
-pip install -e ".[crewai]"
-pip install -e ".[all]"
+# With framework adapters
+pip install agentguardproxy[langchain]
+pip install agentguardproxy[crewai]
+pip install agentguardproxy[browser-use]
+pip install agentguardproxy[all]
+
+# Or from source (editable / development)
+cd plugins/python
+pip install -e ".[dev]"
 ```
 
 ### Basic Usage
@@ -325,12 +330,17 @@ rules:
 ## Running Tests
 
 ```bash
-# All Go tests with race detection
+# Go tests with race detection
 go test -v -race ./...
 
-# With coverage
+# Go coverage
 go test -v -race -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out
+
+# Python SDK tests
+cd plugins/python
+pip install -e ".[dev]"
+pytest -v --cov=agentguard
 ```
 
 ---
@@ -366,7 +376,7 @@ agentguard/
 │   │   │       ├── crewai.py
 │   │   │       ├── browseruse.py
 │   │   │       └── mcp.py
-│   │   ├── setup.py
+│   │   ├── pyproject.toml
 │   │   └── README.md
 │   └── typescript/          # TypeScript SDK
 │       ├── src/index.ts

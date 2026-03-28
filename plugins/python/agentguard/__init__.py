@@ -17,11 +17,30 @@ Usage:
         print(f"Blocked: {result.reason}")
 """
 
+import functools
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Optional
 from urllib import request, error
+
+# --- Defaults and constants ---
+DEFAULT_BASE_URL = "http://localhost:8080"
+DEFAULT_TIMEOUT = 5           # seconds, for individual HTTP calls
+DEFAULT_APPROVAL_TIMEOUT = 300  # seconds, for wait_for_approval
+DEFAULT_POLL_INTERVAL = 2       # seconds
+
+# Decision values (must match the Go backend)
+DECISION_ALLOW = "ALLOW"
+DECISION_DENY = "DENY"
+DECISION_REQUIRE_APPROVAL = "REQUIRE_APPROVAL"
+
+# API endpoint paths
+ENDPOINT_CHECK = "/v1/check"
+ENDPOINT_APPROVE = "/v1/approve/"
+ENDPOINT_DENY = "/v1/deny/"
+ENDPOINT_STATUS = "/v1/status/"
 
 
 @dataclass
@@ -35,23 +54,24 @@ class CheckResult:
 
     @property
     def allowed(self) -> bool:
-        return self.decision == "ALLOW"
+        return self.decision == DECISION_ALLOW
 
     @property
     def denied(self) -> bool:
-        return self.decision == "DENY"
+        return self.decision == DECISION_DENY
 
     @property
     def needs_approval(self) -> bool:
-        return self.decision == "REQUIRE_APPROVAL"
+        return self.decision == DECISION_REQUIRE_APPROVAL
 
 
 class Guard:
     """Client for the AgentGuard proxy."""
 
-    def __init__(self, base_url: str = "http://localhost:8080", agent_id: str = ""):
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, base_url: str = "", agent_id: str = "", timeout: int = DEFAULT_TIMEOUT):
+        self.base_url = (base_url or os.environ.get("AGENTGUARD_URL", DEFAULT_BASE_URL)).rstrip("/")
         self.agent_id = agent_id
+        self.timeout = timeout
 
     def check(
         self,
@@ -97,17 +117,17 @@ class Guard:
 
         data = json.dumps(payload).encode("utf-8")
         req = request.Request(
-            f"{self.base_url}/v1/check",
+            f"{self.base_url}{ENDPOINT_CHECK}",
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
 
         try:
-            with request.urlopen(req, timeout=5) as resp:
+            with request.urlopen(req, timeout=self.timeout) as resp:
                 body = json.loads(resp.read())
                 return CheckResult(
-                    decision=body.get("decision", "DENY"),
+                    decision=body.get("decision", DECISION_DENY),
                     reason=body.get("reason", ""),
                     matched_rule=body.get("matched_rule", ""),
                     approval_id=body.get("approval_id", ""),
@@ -116,18 +136,18 @@ class Guard:
         except error.URLError as e:
             # If AgentGuard is unreachable, default to deny (fail closed)
             return CheckResult(
-                decision="DENY",
+                decision=DECISION_DENY,
                 reason=f"AgentGuard unreachable: {e}",
             )
 
     def approve(self, approval_id: str) -> bool:
         """Approve a pending action."""
         req = request.Request(
-            f"{self.base_url}/v1/approve/{approval_id}",
+            f"{self.base_url}{ENDPOINT_APPROVE}{approval_id}",
             method="POST",
         )
         try:
-            with request.urlopen(req, timeout=5):
+            with request.urlopen(req, timeout=self.timeout):
                 return True
         except error.URLError:
             return False
@@ -135,28 +155,36 @@ class Guard:
     def deny(self, approval_id: str) -> bool:
         """Deny a pending action."""
         req = request.Request(
-            f"{self.base_url}/v1/deny/{approval_id}",
+            f"{self.base_url}{ENDPOINT_DENY}{approval_id}",
             method="POST",
         )
         try:
-            with request.urlopen(req, timeout=5):
+            with request.urlopen(req, timeout=self.timeout):
                 return True
         except error.URLError:
             return False
 
-    def wait_for_approval(self, approval_id: str, timeout: int = 300, poll_interval: int = 2) -> CheckResult:
+    def wait_for_approval(
+        self,
+        approval_id: str,
+        timeout: int = DEFAULT_APPROVAL_TIMEOUT,
+        poll_interval: int = DEFAULT_POLL_INTERVAL,
+    ) -> CheckResult:
         """Block until a pending action is approved or denied (or timeout)."""
         deadline = time.time() + timeout
         while time.time() < deadline:
             # Poll the status endpoint for resolution
             req = request.Request(
-                f"{self.base_url}/v1/status/{approval_id}",
+                f"{self.base_url}{ENDPOINT_STATUS}{approval_id}",
                 method="GET",
             )
             try:
-                with request.urlopen(req, timeout=5) as resp:
+                with request.urlopen(req, timeout=self.timeout) as resp:
                     body = json.loads(resp.read())
-                    if body.get("status") == "resolved" and body.get("decision") in ("ALLOW", "DENY"):
+                    if body.get("status") == "resolved" and body.get("decision") in (
+                        DECISION_ALLOW,
+                        DECISION_DENY,
+                    ):
                         return CheckResult(
                             decision=body["decision"],
                             reason=body.get("reason", "resolved"),
@@ -165,7 +193,7 @@ class Guard:
                 pass
             time.sleep(poll_interval)
 
-        return CheckResult(decision="DENY", reason="Approval timed out")
+        return CheckResult(decision=DECISION_DENY, reason="Approval timed out")
 
 
 # Convenience decorator for guarding functions
@@ -180,6 +208,7 @@ def guarded(scope: str, guard: Optional[Guard] = None, **check_kwargs):
             os.system(cmd)
     """
     def decorator(func):
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
             g = guard or Guard()
             # Try to extract meaningful info from args

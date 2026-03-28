@@ -39,6 +39,10 @@ crewai = ["crewai>=0.1.0"]
 browser-use = ["browser-use>=0.1.0"]
 mcp = []
 all = ["langchain>=0.1.0", "crewai>=0.1.0", "browser-use>=0.1.0"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0"]
 
 [tool.setuptools.packages.find]
 include = ["agentguard*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

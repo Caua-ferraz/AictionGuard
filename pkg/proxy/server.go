@@ -18,6 +18,21 @@ import (
 	"github.com/Caua-ferraz/AgentGuard/pkg/ratelimit"
 )
 
+const (
+	// DefaultAuditQueryLimit is the max entries returned by the audit query endpoint.
+	DefaultAuditQueryLimit = 100
+	// DefaultStatsQueryLimit is the max entries loaded for the stats endpoint.
+	// TODO(perf): For large deployments, compute stats incrementally or use a
+	// dedicated stats table in a database-backed audit store.
+	DefaultStatsQueryLimit = 10000
+	// SSEChannelBufferSize is the buffer size for Server-Sent Events channels.
+	SSEChannelBufferSize = 64
+	// ApprovalIDPrefix is the prefix for generated approval IDs.
+	ApprovalIDPrefix = "ap_"
+	// ShutdownTimeout is the graceful shutdown deadline.
+	ShutdownTimeout = 10 * time.Second
+)
+
 // Config holds the server configuration.
 type Config struct {
 	Port             int
@@ -31,6 +46,11 @@ type Config struct {
 	// AllowedOrigin is returned in Access-Control-Allow-Origin. Defaults to
 	// localhost only. Set to a specific origin or leave empty for localhost.
 	AllowedOrigin string
+	// BaseURL is the externally-reachable URL of this server, used to
+	// construct approval URLs. Defaults to http://localhost:<Port>.
+	BaseURL string
+	// Version is the application version string shown in /health.
+	Version string
 }
 
 // Server is the AgentGuard HTTP proxy.
@@ -118,7 +138,7 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
 	defer cancel()
 	if err := s.http.Shutdown(ctx); err != nil {
 		log.Printf("Shutdown error: %v", err)
@@ -163,7 +183,7 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 	if result.Decision == policy.RequireApproval {
 		pending := s.approval.Add(req, result)
 		result.ApprovalID = pending.ID
-		result.ApprovalURL = fmt.Sprintf("http://localhost:%d/v1/approve/%s", s.cfg.Port, pending.ID)
+		result.ApprovalURL = fmt.Sprintf("%s/v1/approve/%s", s.cfg.BaseURL, pending.ID)
 
 		// Send notification
 		if s.cfg.Notifier != nil {
@@ -260,7 +280,7 @@ func (s *Server) handleAuditQuery(w http.ResponseWriter, r *http.Request) {
 		SessionID: r.URL.Query().Get("session_id"),
 		Decision:  r.URL.Query().Get("decision"),
 		Scope:     r.URL.Query().Get("scope"),
-		Limit:     100,
+		Limit:     DefaultAuditQueryLimit,
 	}
 
 	entries, err := s.cfg.Logger.Query(filter)
@@ -276,12 +296,12 @@ func (s *Server) handleAuditQuery(w http.ResponseWriter, r *http.Request) {
 // handleHealth returns server health status.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": "0.2.0"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": s.cfg.Version})
 }
 
 // handleStats returns aggregate statistics for the dashboard.
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	entries, err := s.cfg.Logger.Query(audit.QueryFilter{Limit: 10000})
+	entries, err := s.cfg.Logger.Query(audit.QueryFilter{Limit: DefaultStatsQueryLimit})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -393,7 +413,7 @@ func (q *ApprovalQueue) Add(req policy.ActionRequest, result policy.CheckResult)
 		log.Printf("crypto/rand failed, falling back: %v", err)
 		b[0] = byte(time.Now().UnixNano())
 	}
-	id := "ap_" + hex.EncodeToString(b[:])
+	id := ApprovalIDPrefix + hex.EncodeToString(b[:])
 	pa := &PendingAction{
 		ID:        id,
 		Request:   req,
@@ -446,7 +466,7 @@ func (q *ApprovalQueue) List() []*PendingAction {
 func (q *ApprovalQueue) Subscribe() chan AuditEvent {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	ch := make(chan AuditEvent, 64)
+	ch := make(chan AuditEvent, SSEChannelBufferSize)
 	q.watchers = append(q.watchers, ch)
 	return ch
 }
@@ -607,6 +627,7 @@ var dashboardHTML = `<!DOCTYPE html>
   <script>
     const feed = document.getElementById('feed');
     const pendingEl = document.getElementById('pending');
+    const MAX_FEED_ENTRIES = 200;
 
     // Load stats
     function refreshStats() {
@@ -673,7 +694,7 @@ var dashboardHTML = `<!DOCTYPE html>
       feed.prepend(el);
 
       // Keep feed at 200 entries max
-      while (feed.children.length > 200) feed.removeChild(feed.lastChild);
+      while (feed.children.length > MAX_FEED_ENTRIES) feed.removeChild(feed.lastChild);
 
       refreshStats();
       if (decision === 'REQUIRE_APPROVAL' || data.type === 'resolved') refreshPending();

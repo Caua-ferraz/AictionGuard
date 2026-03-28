@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+// DefaultPollInterval is how often the watcher checks for policy file changes.
+// TODO(perf): Replace polling with fsnotify for instant reload and zero CPU
+// overhead. Polling at DefaultPollInterval is acceptable for single-file
+// watching but won't scale to directory watching.
+const DefaultPollInterval = 2 * time.Second
+
 // FileWatcher watches a policy file for changes and triggers a callback.
 type FileWatcher struct {
 	path     string
@@ -33,7 +39,7 @@ func WatchFile(path string, callback func(*Policy)) (*FileWatcher, error) {
 }
 
 func (w *FileWatcher) poll() {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(DefaultPollInterval)
 	defer ticker.Stop()
 
 	for {
