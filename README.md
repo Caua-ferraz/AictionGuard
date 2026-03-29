@@ -309,11 +309,16 @@ agentguard serve --dashboard
 # → http://localhost:8080/dashboard
 ```
 
+<p align="center">
+  <img src="docs/assets/dashboard.svg" alt="AgentGuard Dashboard — live action feed with allow/deny/pending entries and one-click approval sidebar" width="900" />
+</p>
+
 **Features:**
-- **Live feed** — Watch agent actions stream in real time via SSE
-- **Approval queue** — Approve or deny pending actions with one click
-- **Statistics** — Total checks, allowed/denied/pending counts
-- **Connection status** — Live/disconnected indicator
+- **Live action feed** — Every check streams in real time via SSE, color-coded by decision (green = ALLOW, red = DENY, yellow = REQUIRE_APPROVAL)
+- **One-click approvals** — Pending actions appear in the sidebar with Approve / Deny buttons; no CLI needed
+- **Stats bar** — Running totals of total checks, allowed, denied, and pending approval counts
+- **Connection indicator** — LIVE badge turns red if the SSE stream drops
+- **Agent context** — Each entry shows the agent ID, scope, action, matched rule reason, and timestamp
 
 ## Adapters
 

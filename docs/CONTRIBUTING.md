@@ -75,6 +75,44 @@ Version format: `MAJOR.MINOR.PATCH` → `0.0.0`
 
 > **PyPI note:** Never re-use a version number. PyPI permanently rejects duplicate uploads even after deletion. Always bump before publishing.
 
+## Testing Metrics
+
+The `/metrics` endpoint exposes Prometheus-compatible counters and histograms. When working on the hot path (`handleCheck`, policy engine, audit logger), verify your changes don't regress latency:
+
+```bash
+# 1. Start the server
+agentguard serve --policy configs/default.yaml --port 8080
+
+# 2. Send a few test checks
+curl -s -X POST http://localhost:8080/v1/check \
+  -H "Content-Type: application/json" \
+  -d '{"scope":"shell","command":"ls -la","agent_id":"test"}'
+
+# 3. Inspect per-phase timing headers on a single request
+curl -si -X POST http://localhost:8080/v1/check \
+  -H "Content-Type: application/json" \
+  -d '{"scope":"shell","command":"ls -la","agent_id":"test"}' \
+  | grep -i x-agentguard
+# X-AgentGuard-Policy-Ms: 0.143
+# X-AgentGuard-Audit-Ms:  0.891
+# X-AgentGuard-Total-Ms:  1.034
+
+# 4. Scrape all metrics (counters + histograms)
+curl -s http://localhost:8080/metrics
+```
+
+Key metrics to watch when contributing:
+
+| Metric | What it measures |
+|--------|-----------------|
+| `agentguard_policy_eval_duration_ms` | Time in `Engine.Check` — policy rule matching |
+| `agentguard_audit_write_duration_ms` | Time in `Logger.Log` — disk I/O |
+| `agentguard_request_duration_ms` | End-to-end `/v1/check` latency |
+| `agentguard_denied_total` | Cumulative deny count (sanity check for policy tests) |
+| `agentguard_pending_approvals` | Current approval queue depth |
+
+Histogram buckets go from 0.25 ms to 1000 ms. A healthy server at low load should show p99 `request_duration_ms` below 5 ms.
+
 ## Pull Request Process
 
 - Fork the repo, create a feature branch

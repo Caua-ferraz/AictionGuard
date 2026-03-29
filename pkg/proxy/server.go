@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Caua-ferraz/AgentGuard/pkg/audit"
+	"github.com/Caua-ferraz/AgentGuard/pkg/metrics"
 	"github.com/Caua-ferraz/AgentGuard/pkg/notify"
 	"github.com/Caua-ferraz/AgentGuard/pkg/policy"
 	"github.com/Caua-ferraz/AgentGuard/pkg/ratelimit"
@@ -21,10 +23,6 @@ import (
 const (
 	// DefaultAuditQueryLimit is the max entries returned by the audit query endpoint.
 	DefaultAuditQueryLimit = 100
-	// DefaultStatsQueryLimit is the max entries loaded for the stats endpoint.
-	// TODO(perf): For large deployments, compute stats incrementally or use a
-	// dedicated stats table in a database-backed audit store.
-	DefaultStatsQueryLimit = 10000
 	// SSEChannelBufferSize is the buffer size for Server-Sent Events channels.
 	SSEChannelBufferSize = 64
 	// ApprovalIDPrefix is the prefix for generated approval IDs.
@@ -101,6 +99,13 @@ func NewServer(cfg Config) *Server {
 		limiter: ratelimit.New(),
 	}
 
+	// Seed in-memory counters from existing audit log so stats survive restarts.
+	if existing, err := cfg.Logger.Query(audit.QueryFilter{}); err == nil {
+		for _, e := range existing {
+			metrics.IncDecision(string(e.Result.Decision))
+		}
+	}
+
 	mux := http.NewServeMux()
 
 	// Core API
@@ -112,8 +117,9 @@ func NewServer(cfg Config) *Server {
 	// Audit API
 	mux.HandleFunc("/v1/audit", s.handleAuditQuery)
 
-	// Health
+	// Health + Metrics
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/metrics", s.handleMetrics)
 
 	// Dashboard
 	if cfg.DashboardEnabled {
@@ -166,6 +172,7 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			key := fmt.Sprintf("%s:%s", req.Scope, req.AgentID)
 			if err := s.limiter.Allow(key, rlCfg.MaxRequests, window); err != nil {
+				metrics.IncRateLimited()
 				result := policy.CheckResult{
 					Decision: policy.Deny,
 					Reason:   err.Error(),
@@ -177,7 +184,10 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	evalStart := time.Now()
 	result := s.cfg.Engine.Check(req)
+	evalMs := float64(time.Since(evalStart).Microseconds()) / 1000.0
+	metrics.PolicyEvalDuration.Observe(evalMs)
 
 	// If approval required, queue it
 	if result.Decision == policy.RequireApproval {
@@ -221,9 +231,21 @@ func (s *Server) logAndRespond(w http.ResponseWriter, req policy.ActionRequest, 
 		Result:     result,
 		DurationMs: duration.Milliseconds(),
 	}
+	auditStart := time.Now()
 	if err := s.cfg.Logger.Log(entry); err != nil {
 		log.Printf("Audit log error: %v", err)
 	}
+	auditMs := float64(time.Since(auditStart).Microseconds()) / 1000.0
+	metrics.AuditWriteDuration.Observe(auditMs)
+
+	totalMs := float64(duration.Microseconds()) / 1000.0
+	metrics.RequestDuration.Observe(totalMs)
+	metrics.IncDecision(string(result.Decision))
+
+	// Expose per-phase timing as response headers for easy curl inspection.
+	w.Header().Set("X-AgentGuard-Policy-Ms", fmt.Sprintf("%.3f", totalMs-auditMs))
+	w.Header().Set("X-AgentGuard-Audit-Ms", fmt.Sprintf("%.3f", auditMs))
+	w.Header().Set("X-AgentGuard-Total-Ms", fmt.Sprintf("%.3f", totalMs))
 
 	// Push to SSE watchers
 	s.approval.Broadcast(AuditEvent{
@@ -299,41 +321,31 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": s.cfg.Version})
 }
 
+// handleMetrics serves Prometheus-compatible metrics in text format.
+// Scrape with: curl http://localhost:8080/metrics
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	metrics.SetPendingApprovals(len(s.approval.List()))
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	metrics.WritePrometheus(w)
+}
+
 // handleStats returns aggregate statistics for the dashboard.
+// Reads from in-memory atomic counters (O(1)) rather than scanning the audit
+// file, so it stays accurate regardless of how large the log grows.
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	entries, err := s.cfg.Logger.Query(audit.QueryFilter{Limit: DefaultStatsQueryLimit})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	total := len(entries)
-	allowed := 0
-	denied := 0
-	approvals := 0
-	for _, e := range entries {
-		switch e.Result.Decision {
-		case policy.Allow:
-			allowed++
-		case policy.Deny:
-			denied++
-		case policy.RequireApproval:
-			approvals++
-		}
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]int{
-		"total":     total,
-		"allowed":   allowed,
-		"denied":    denied,
-		"approvals": approvals,
+	_ = json.NewEncoder(w).Encode(map[string]uint64{
+		"total":     atomic.LoadUint64(&metrics.ChecksTotal),
+		"allowed":   atomic.LoadUint64(&metrics.AllowedTotal),
+		"denied":    atomic.LoadUint64(&metrics.DeniedTotal),
+		"approvals": atomic.LoadUint64(&metrics.ApprovalTotal),
 	})
 }
 
 // handleDashboard serves the web dashboard.
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Cache-Control", "no-store")
 	fmt.Fprint(w, dashboardHTML)
 }
 
@@ -606,7 +618,7 @@ var dashboardHTML = `<!DOCTYPE html>
 <body>
   <div class="header">
     <h1>AgentGuard</h1>
-    <span class="badge" id="status-badge">&#x25cf; LIVE</span>
+    <span class="badge" id="status-badge">● LIVE</span>
   </div>
   <div class="stats">
     <div class="stat-card"><div class="label">Total Checks</div><div class="value" id="stat-total">0</div></div>
@@ -628,6 +640,24 @@ var dashboardHTML = `<!DOCTYPE html>
     const feed = document.getElementById('feed');
     const pendingEl = document.getElementById('pending');
     const MAX_FEED_ENTRIES = 200;
+
+    // Shared entry renderer used by both history load and live SSE.
+    // entry shape: { request, result, timestamp } — works for both audit entries and SSE events.
+    function renderEntry(entry) {
+      const result = entry.result || {};
+      const decision = result.decision || 'UNKNOWN';
+      const req = entry.request || {};
+      const action = req.command || req.path || req.domain || 'unknown';
+      const el = document.createElement('div');
+      el.className = 'entry ' + decision;
+      el.innerHTML =
+        '<div class="decision ' + decision + '">' + decision + '</div>' +
+        '<div class="action">' + (req.scope || '') + ': ' + action + '</div>' +
+        '<div class="meta">Agent: ' + (req.agent_id || 'unknown') +
+        ' &bull; ' + new Date(entry.timestamp).toLocaleTimeString() +
+        (result.reason ? ' &bull; ' + result.reason : '') + '</div>';
+      return el;
+    }
 
     // Load stats
     function refreshStats() {
@@ -674,35 +704,54 @@ var dashboardHTML = `<!DOCTYPE html>
         .catch(e => console.error(e));
     }
 
-    // SSE live feed
+    // Load historical entries on page open so the feed isn't blank.
+    // Fetches the last MAX_FEED_ENTRIES audit entries (newest-first after reversing).
+    function loadHistory() {
+      fetch('/v1/audit?limit=' + MAX_FEED_ENTRIES)
+        .then(r => r.json())
+        .then(entries => {
+          if (!entries || entries.length === 0) return;
+          feed.querySelector('.empty')?.remove();
+          // Audit entries come oldest-first; reverse so newest is at the top.
+          entries.slice().reverse().forEach(entry => {
+            feed.appendChild(renderEntry(entry));
+          });
+        })
+        .catch(() => {});
+    }
+    loadHistory();
+
+    // SSE live feed — prepends new events above the history.
     const es = new EventSource('/api/stream');
     es.onmessage = (e) => {
       const data = JSON.parse(e.data);
-      const decision = data.result ? data.result.decision : data.type;
-      const action = (data.request.command || data.request.path || data.request.domain || 'unknown');
-
-      const el = document.createElement('div');
-      el.className = 'entry ' + decision;
-      el.innerHTML =
-        '<div class="decision ' + decision + '">' + decision + '</div>' +
-        '<div class="action">' + data.request.scope + ': ' + action + '</div>' +
-        '<div class="meta">Agent: ' + (data.request.agent_id || 'unknown') +
-        ' &bull; ' + new Date(data.timestamp).toLocaleTimeString() +
-        (data.result && data.result.reason ? ' &bull; ' + data.result.reason : '') + '</div>';
-
       feed.querySelector('.empty')?.remove();
-      feed.prepend(el);
+      feed.prepend(renderEntry(data));
 
-      // Keep feed at 200 entries max
+      // Keep feed at MAX_FEED_ENTRIES entries
       while (feed.children.length > MAX_FEED_ENTRIES) feed.removeChild(feed.lastChild);
 
       refreshStats();
+      const decision = (data.result || {}).decision;
       if (decision === 'REQUIRE_APPROVAL' || data.type === 'resolved') refreshPending();
     };
+    es.onopen = () => {
+      const badge = document.getElementById('status-badge');
+      badge.textContent = '● LIVE';
+      badge.style.color = '#4ade80';
+      badge.style.background = '#1a3a1a';
+    };
     es.onerror = () => {
-      document.getElementById('status-badge').textContent = '&#x25cf; DISCONNECTED';
-      document.getElementById('status-badge').style.color = '#f87171';
-      document.getElementById('status-badge').style.background = '#3a1a1a';
+      const badge = document.getElementById('status-badge');
+      if (es.readyState === 2) {
+        badge.textContent = '● DISCONNECTED';
+        badge.style.color = '#f87171';
+        badge.style.background = '#3a1a1a';
+      } else {
+        badge.textContent = '● RECONNECTING...';
+        badge.style.color = '#fbbf24';
+        badge.style.background = '#1a1500';
+      }
     };
   </script>
 </body>
