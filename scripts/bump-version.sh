@@ -2,6 +2,9 @@
 # bump-version.sh — Update the version string across all files in the repo.
 #
 # Usage:
+#   cd to the root of the repo
+#   ./scripts/bump-version.sh <new-version>  (e.g. 0.3.0)
+# Example:
 #   ./scripts/bump-version.sh 0.3.0
 #
 # Files updated:
