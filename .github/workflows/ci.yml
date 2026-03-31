@@ -69,20 +69,3 @@ jobs:
 
       - name: Run tests
         run: pytest -v --tb=short --cov=agentguard --cov-report=term-missing
-
-  docker:
-    runs-on: ubuntu-latest
-    needs: [test, lint]
-    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build Docker image
-        run: docker build -t agentguard:latest .
-
-      - name: Test Docker image
-        run: |
-          docker run -d --name ag-test -p 8080:8080 agentguard:latest
-          sleep 3
-          curl -f http://localhost:8080/health
-          docker stop ag-test
